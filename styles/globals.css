@@ -1,0 +1,10 @@
+html, body, #__next {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background: #0a0f1e;
+}
+
+/* keep component in-file styles for prototype */

@@ -1,0 +1,22 @@
+{
+  "name": "railway-smart-next",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run realtime\" \"npm run next-dev\"",
+    "next-dev": "next dev --webpack",
+    "dev:all": "concurrently \"npm run realtime\" \"npm run next-dev\"",
+    "build": "next build",
+    "start": "next start",
+    "realtime": "node realtime-server.js"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "ws": "latest"
+  },
+  "devDependencies": {
+    "concurrently": "latest"
+  }
+}
