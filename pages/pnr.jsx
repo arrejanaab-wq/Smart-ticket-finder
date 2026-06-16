@@ -529,6 +529,9 @@ export default function PnrChecker() {
           <Link href="/pnr" className="nav-btn active">
             🎫 PNR Status
           </Link>
+          <Link href="/live-status" className="nav-btn">
+            📡 Live Tracking
+          </Link>
         </div>
       </nav>
 

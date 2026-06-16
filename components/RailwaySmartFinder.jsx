@@ -253,12 +253,15 @@ export default function App() {
             classType: selectedClass
           })
         })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error("API error");
+          return res.json();
+        })
         .then(data => ({
           from: fromStation,
           to: toStation,
-          availability: data.availability,
-          isLiveResponse: data.live
+          availability: data.availability || generateAvailability(i + date.charCodeAt(0) % 10, stations.length, selectedClass),
+          isLiveResponse: !!data.live
         }))
         .catch(err => {
           console.error("Live segment fetch error:", err);
@@ -1032,6 +1035,9 @@ export default function App() {
             <Link href="/pnr" className="nav-btn">
               🎫 PNR Status
             </Link>
+            <Link href="/live-status" className="nav-btn">
+              📡 Live Tracking
+            </Link>
           </div>
         </nav>
 
@@ -1251,11 +1257,12 @@ export default function App() {
                 <div className="timeline">
                   {result.segments.map((seg, i) => {
                     const isFirst = i === 0;
+                    const availStatus = seg.availability?.status || "WL";
                     const isFirstAvail = originBlocked &&
-                      seg.availability.status === "AVAILABLE" &&
-                      result.segments.slice(0, i).every((s) => s.availability.status !== "AVAILABLE");
-                    const dotClass = seg.availability.status === "AVAILABLE" ? "available"
-                      : seg.availability.status === "RAC" ? "rac" : "wl";
+                      availStatus === "AVAILABLE" &&
+                      result.segments.slice(0, i).every((s) => (s.availability?.status || "WL") !== "AVAILABLE");
+                    const dotClass = availStatus === "AVAILABLE" ? "available"
+                      : availStatus === "RAC" ? "rac" : "wl";
 
                     return (
                       <div key={i} className="segment">
@@ -1273,7 +1280,7 @@ export default function App() {
                             {seg.from.time} D{seg.from.day}
                             <br />→ {seg.to.time} D{seg.to.day}
                           </div>
-                          <StatusBadge avail={seg.availability} />
+                          <StatusBadge avail={seg.availability || { status: 'WL', waitlist: 0 }} />
                           {isFirstAvail && <span className="best-tag">BOARD HERE</span>}
                         </div>
                       </div>

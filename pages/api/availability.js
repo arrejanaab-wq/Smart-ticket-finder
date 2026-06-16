@@ -1,3 +1,5 @@
+import { configure, getAvailability } from 'irctc-connect';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -9,9 +11,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing required parameters: trainNo, fromCode, toCode, date, classType' });
   }
 
-  const apiKey = '9b4afd95eamsh346f30e65302ca7p1d0e60jsnc035c6e8985d';
+  const apiKey = 'irctc_1673dd27de28351da10c2b6e891f75f0125dbe76524f1d99';
+  configure(apiKey);
   
-  // Normalize date format from YYYY-MM-DD to DD-MM-YYYY (IRCTC default)
+  // Normalize date format from YYYY-MM-DD to DD-MM-YYYY if needed
   let formattedDate = date;
   if (date.includes('-')) {
     const parts = date.split('-');
@@ -20,96 +23,53 @@ export default async function handler(req, res) {
     }
   }
 
-  const cleanTrainNo = trainNo.toString().replace(/\D/g, ''); // Extract digits only
-  const cleanFrom = fromCode.trim().toUpperCase();
-  const cleanTo = toCode.trim().toUpperCase();
+  console.log(`[irctc-connect] Checking availability for ${trainNo} on ${formattedDate} (${classType})...`);
 
-  // RapidAPI Multi-Host Proxy Chain for maximum compatibility
-  const hosts = [
-    { name: 'irctc-indian-railway.p.rapidapi.com', path: `/api/v1/checkSeatAvailability?classType=${classType}&fromStationCode=${cleanFrom}&toStationCode=${cleanTo}&date=${formattedDate}&trainNo=${cleanTrainNo}&quota=GN` },
-    { name: 'indian-railway-irctc.p.rapidapi.com', path: `/api/v1/checkSeatAvailability?classType=${classType}&fromStationCode=${cleanFrom}&toStationCode=${cleanTo}&date=${formattedDate}&trainNo=${cleanTrainNo}&quota=GN` },
-    { name: 'indianrailways.p.rapidapi.com', path: `/index.php?action=checkSeatAvailability&classType=${classType}&fromStationCode=${cleanFrom}&toStationCode=${cleanTo}&date=${formattedDate}&trainNo=${cleanTrainNo}&quota=GN` }
-  ];
+  try {
+    // irctc-connect: getAvailability(trainNo, from, to, date, coach, quota)
+    // Defaulting quota to 'GN' (General) if not provided
+    const result = await getAvailability(trainNo, fromCode, toCode, formattedDate, classType, 'GN');
 
-  console.log(`[API Proxy] Querying live IRCTC availability for Train ${cleanTrainNo} from ${cleanFrom} to ${cleanTo} on ${formattedDate}...`);
+    if (result.success) {
+      // result.data.availability is an array of dates
+      const availabilityArray = result.data.availability || [];
+      const requestedDate = formattedDate; // DD-MM-YYYY
 
-  let data = null;
-  let successHost = '';
-
-  for (const host of hosts) {
-    try {
-      console.log(`[API Proxy] Attempting availability fetch on host: ${host.name}...`);
-      const apiResponse = await fetch(`https://${host.name}${host.path}`, {
-        method: 'GET',
-        headers: {
-          'x-rapidapi-key': apiKey,
-          'x-rapidapi-host': host.name
-        }
-      });
-
-      if (apiResponse.ok) {
-        data = await apiResponse.json();
-        successHost = host.name;
-        console.log(`[API Proxy] Availability connection SUCCESS on host: ${host.name}`);
-        break; // Stop trying other hosts
-      } else {
-        console.warn(`[API Proxy] Availability Host ${host.name} returned status code: ${apiResponse.status}`);
-      }
-    } catch (error) {
-      console.error(`[API Proxy] Error trying availability host ${host.name}:`, error.message);
-    }
-  }
-
-  // Parse availability details from whichever host succeeded
-  if (data && data.status) {
-    const rawData = Array.isArray(data.data) ? data.data : (data.availability || []);
-    if (rawData.length > 0) {
-      const liveItem = rawData[0];
-      const statusStr = (liveItem.current_status || liveItem.status || liveItem.availability || '').toUpperCase();
+      // Try to find the exact date or default to the first one
+      const availData = availabilityArray.find(a => a.date === requestedDate) || availabilityArray[0] || {};
       
-      let availability = { status: 'WL', waitlist: 10 }; // Default fallback
+      let status = 'WL';
+      let seats = 0;
+      let waitlist = 0;
 
-      if (statusStr.includes('AVAILABLE') || statusStr.includes('CURR_AVBL') || statusStr.includes('AVBL')) {
-        const seatsMatch = statusStr.match(/\d+/);
-        availability = {
-          status: 'AVAILABLE',
-          seats: seatsMatch ? parseInt(seatsMatch[0], 10) : 12
-        };
-      } else if (statusStr.includes('RAC')) {
-        const seatsMatch = statusStr.match(/\d+/);
-        availability = {
-          status: 'RAC',
-          seats: seatsMatch ? parseInt(seatsMatch[0], 10) : 6
-        };
-      } else if (statusStr.includes('WL') || statusStr.includes('WAITLIST') || statusStr.includes('REGRET')) {
-        const wlMatch = statusStr.match(/\d+/);
-        availability = {
-          status: 'WL',
-          waitlist: wlMatch ? parseInt(wlMatch[0], 10) : 18
-        };
+      const availText = (availData.availabilityText || availData.status || '').toUpperCase();
+      
+      if (availText.includes('AVL') || availText.includes('AVAILABLE')) {
+        status = 'AVAILABLE';
+        // Extract number from "AVL 103" or "AVAILABLE-0103"
+        const match = availText.match(/\d+/);
+        seats = match ? parseInt(match[0]) : 0;
+      } else if (availText.includes('RAC')) {
+        status = 'RAC';
+        const match = availText.match(/\d+/);
+        seats = match ? parseInt(match[0]) : 0;
+      } else if (availText.includes('WL') || availText.includes('WAITLIST')) {
+        status = 'WL';
+        const match = availText.match(/\d+/);
+        waitlist = match ? parseInt(match[0]) : 0;
       }
 
-      console.log(`[API Proxy] Success! Live Status for ${cleanFrom}->${cleanTo} via ${successHost}:`, availability);
-      return res.status(200).json({ live: true, availability });
+      return res.status(200).json({ 
+        success: true, 
+        availability: { status, seats, waitlist },
+        live: true
+      });
+    } else {
+      console.error(`[irctc-connect] Availability API Error:`, result.message || result.error);
+      return res.status(500).json({ error: result.message || 'Failed to fetch availability' });
     }
+  } catch (error) {
+    console.error(`[irctc-connect] Availability Unexpected Error:`, error);
+    return res.status(500).json({ error: 'An unexpected error occurred while fetching availability' });
   }
-
-  // Resilient offline/limit fallback: Dynamic parameter-matched simulation
-  console.warn(`[API Proxy] Availability fetch failed or empty. Serving parameter-matched simulation fallback.`);
-  
-  const seed = cleanFrom.charCodeAt(0) + cleanTo.charCodeAt(0) + classType.charCodeAt(0);
-  const rand = Math.abs(Math.sin(seed) * 1000) % 1;
-
-  let fallbackAvail = { status: 'WL', waitlist: Math.floor(rand * 45) + 2 };
-  if (rand > 0.6) {
-    fallbackAvail = { status: 'AVAILABLE', seats: Math.floor(rand * 30) + 3 };
-  } else if (rand > 0.42) {
-    fallbackAvail = { status: 'RAC', seats: Math.floor(rand * 6) + 1 };
-  }
-
-  return res.status(200).json({ 
-    live: false, 
-    availability: fallbackAvail,
-    warning: 'Mock availability generated (API Limit Reached or Subscriptions Unresolved)' 
-  });
 }
